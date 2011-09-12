@@ -1,0 +1,174 @@
+
+<script src="processing.js"></script>
+<script src="dsp.js"></script>
+<script src="beatdetektor.js"></script>
+
+<script src="banks.js"></script>
+
+
+<script>
+  var audio;
+  var output;
+  var audioDurationInSeconds;
+  var audioDurationInRadians = 2*Math.PI;
+  var audioPositionInSeconds = 0;
+  var audioPositionInRadians = 0;
+  var frameBufferSize = 4096;
+  var frameTimer = 0;
+  var channels;
+  var sampleRate;
+  var bd;
+  var kick;
+  var vu;
+  
+  var fft;
+  var signal;
+
+  function loadedMetaData(event) {
+    audio = document.getElementById('input');
+    audio.mozFrameBufferLength = frameBufferSize;
+    channels = audio.mozChannels;
+    sampleRate = audio.mozSampleRate;
+    audioDurationInSeconds = audio.duration;
+    
+    bufferSize = (frameBufferSize / channels) / 2;
+    
+    fft     = new RFFT(bufferSize, sampleRate);
+    signal  = new Float32Array(bufferSize);
+    bd      = new BeatDetektor();
+    kd      = new BeatDetektor.modules.vis.BassKick();
+    vu      = new BeatDetektor.modules.vis.VU();
+    
+    audio.addEventListener("MozAudioAvailable", audioAvailable, false);    
+  }
+  
+  function audioAvailable(event) {
+    audioPositionInSeconds = audio.currentTime;
+    audioPositionInRadians = audioPositionInSeconds / audioDurationInSeconds * audioDurationInRadians;
+  
+    // deinterleave and mix down to mono
+    signal = DSP.getChannel(DSP.MIX, event.frameBuffer);
+
+    // perform forward transform
+    fft.forward(signal);
+    
+    bd.process(audioPositionInSeconds, fft.spectrum);
+    
+    frameTimer += bd.last_update;
+    if (frameTimer > 1.0 / 24.0) {
+        vu.process(bd, frameTimer);
+
+        frameTimer = 0;
+    }
+    
+    kd.process(bd);
+  }
+  
+  // Radial Sequencer Helper functions -- @corban
+  var banks = banks || {};
+  
+  var selected = {bank: null, track: null};
+  
+  function isTrackSelected() {
+    return (selected.bank !== null && selected.track !== null);
+  }
+  
+  function startTrack(bankId) {
+    if (typeof banks[bankId] === "undefined") { // track bank does not exist yet
+      banks[bankId] = [];
+    }
+
+    var currentTrackId = banks[bankId].length;
+
+    if (currentTrackId - 1 >= 0 && banks[bankId][currentTrackId - 1].end == null) { // track has not finished
+      // do nothing
+    } else {
+      banks[bankId].push({
+        start: audioPositionInRadians,
+        end: null
+      });
+
+      selected.bank = bankId;
+      selected.track = currentTrackId;
+    }
+  }
+
+  function endTrack(bankId) {
+    var currentTrackId = banks[bankId].length - 1;
+
+    banks[bankId][currentTrackId].end = audioPositionInRadians;
+  }
+  
+  function findActiveBanks(position) {
+    var activeBanks = {};
+    var activeTrack = null;
+    for (var i in banks) {
+      activeTrack = findActiveTrack(i, position);
+      if (activeTrack !== null) {
+        activeBanks[i] = activeTrack;
+      }
+    }
+    return activeBanks;
+  }
+  
+  function findActiveTrack(bankId, position) {
+    var bank = banks[bankId];
+    for (var i = 0, len = bank.length; i < len; i++) {
+      if (bank[i].start <= position && position <= bank[i].end) {
+        return i;
+      }
+    }
+    return null;
+  }
+
+  document.addEventListener("DOMContentLoaded", function() {
+    output = document.getElementById("output");
+  }, false);
+</script>
+
+<style>
+  body {
+    background-color: rgb(30, 30, 30);
+  }
+</style>
+<textarea id="output" style="float: right; width: 500px; height: 500px;">
+  "The only limit is your own imagination."
+
+  COMMANDS
+    
+    Mouse
+      
+      LEFT button   Selects/Deselects a track
+      
+      RIGHT button  Sets play head
+      
+    Keyboard
+      
+      SPACE         Play/pause
+      
+      ENTER         Sets play head to start of selected track
+      
+      ESC           Deselects track and resets zoom
+      
+      -             Zoom in
+      
+      =             Zoom out
+      
+      .             Save
+      
+      ,             Load
+      
+      \             Delete selected track
+      
+      a-z           Hold and release to create a new track
+      
+      0-9           with track selected, Creates cue point
+                    without, Sets play head to cue point
+                    
+      ]             Next track
+      
+      [             Previous track
+</textarea>
+
+<canvas data-processing-sources="sequencer.pjs" width="200" height="200"></canvas><br />
+<audio id="input" src="no-comply.ogg" controls="true" onloadedmetadata="loadedMetaData(event);" style="width: 500px;"></audio><br />

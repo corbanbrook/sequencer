@@ -1,0 +1,282 @@
+void setup() {
+  size(500, 500);
+  strokeCap(SQUARE);
+  noFill();
+}
+
+var cues = [];
+
+int BIG = 16;
+int SMALL = BIG * 0.7;
+
+float ZOOM = 1;
+float ZOOM_TARGET = ZOOM;
+float OFFSET_X = 0;
+float OFFSET_Y = 0;
+float OFFSET_TARGET_X = OFFSET_X;
+//float OFFSET_TARGET_Y = OFFSET_Y;
+float OFFSET_TARGET_Y = 100;
+
+void animate(current, target, inc) {
+  if (current != target) {
+    if (current < target) {
+      current += inc;  
+      if (target - current < inc) {
+        current = target;
+      }
+    } else {
+      current -= inc;
+      if (target - current > inc) {
+        current = target;
+      }
+    }
+  }
+  return current;
+}
+
+void draw() {
+  background(30);
+  
+  //beatDetection();
+
+  translate(width/2, height/2);
+
+  ZOOM = animate(ZOOM, ZOOM_TARGET, 0.1);
+  OFFSET_X = animate(OFFSET_X, OFFSET_TARGET_X, 1);
+  OFFSET_Y = animate(OFFSET_Y, OFFSET_TARGET_Y, 1);
+
+  translate(OFFSET_X, OFFSET_Y);
+  scale(ZOOM);
+  rotate(-audioPositionInRadians);
+
+  int row = 0;
+  var activeBanks = findActiveBanks(audioPositionInRadians);
+
+  for (var i in banks) {
+    pushMatrix();
+      rotate(radians(-90));
+
+      for (var j = 0; j < banks[i].length; j++) {
+        if (selected.bank == i && selected.track == j) { // Selected track
+          stroke(255, 0, 0);
+          strokeWeight(BIG);
+        } else if (activeBanks[i] == j) { // Active track
+          stroke(255);
+          strokeWeight(BIG);
+        } else { // Deactive track
+          stroke(200);
+          strokeWeight(SMALL);
+        }
+
+        if (typeof banks[i][j].end == "number") {
+          arc2(0, 0, 32 + row * BIG, banks[i][j].start, banks[i][j].end);
+        } else {
+          arc2(0, 0, 32 + row * BIG, banks[i][j].start, audioPositionInRadians);
+        }
+      }
+    popMatrix();
+    row += 1;
+  }
+
+  pushMatrix();
+    rotate(radians(-90));
+    stroke(100);
+    strokeWeight(SMALL);
+    arc2(0, 0, 32 + row * BIG, 0, audioPositionInRadians);
+  popMatrix();
+
+  stroke(100);
+  strokeWeight(SMALL/2);
+  arc2(0, 0, 20, 0, TWO_PI);
+
+  strokeWeight(1);
+  line(0, -20, 0, -1000);
+
+  stroke(100, 50);
+  pushMatrix();
+    rotate(audioPositionInRadians);
+    line(0, -20, 0, -1000);
+  popMatrix();
+}
+
+void keyPressed() {
+  var bankId = char(key).toString();
+
+  if (/[a-z]/.test(bankId)) {
+    startTrack(bankId);
+  } 
+  
+  else if (/[0-9]/.test(bankId)) {
+    var cuePos = parseInt(bankId, 10);
+    if (isTrackSelected()) {
+      cues[cuePos] = banks[selected.bank][selected.track].start;
+      selected.bank = null;
+      selected.track = null;
+    } else if (cues[cuePos]) {
+      var newPositionInSeconds = cues[cuePos] / TWO_PI * audioDurationInSeconds;
+      audio.currentTime = newPositionInSeconds;
+    }
+  } 
+  
+  else if (bankId == ".") { // save banks
+    output.value = JSON.stringify(banks, null, 2);
+  } 
+  
+  else if (bankId == ",") { // load banks
+    banks = JSON.parse(output.value); 
+  } 
+  
+  else if (key == '\\') { // delete a track
+    if (isTrackSelected()) {
+      banks[selected.bank].splice(selected.track, 1);
+      if (banks[selected.bank].length > 0) {
+        selected.track = banks[selected.bank].length - 1;
+      } else {
+        selected.bank = null;
+        selected.track = null;
+      }
+    }
+  } 
+  
+  else if (key == ENTER) { // adjust playhead to selected track
+    if (isTrackSelected()) {
+      var newPositionInSeconds =  banks[selected.bank][selected.track].start / TWO_PI * audioDurationInSeconds;
+      audio.currentTime = newPositionInSeconds;
+      audio.play();
+    }
+  }
+
+  else if (key == ' ') { // pause/play
+    if (audio.paused) {
+      audio.play();
+    } else {
+      audio.pause();
+    }
+  }
+  
+  else if (key == '=') { // zoom in
+    ZOOM_TARGET += 1; 
+  } 
+  
+  else if (key == '-') { // zoom out
+    ZOOM_TARGET -= 1;
+
+    if (ZOOM_TARGET < 1) {
+      ZOOM_TARGET = 1;
+    }
+  } 
+  
+  else if (key == ESC) { // reset the view and deselect tracks
+    selected.bank = null;
+    selected.track = null;
+    ZOOM_TARGET = 1;
+    OFFSET_TARGET_X = 0;
+    OFFSET_TARGET_Y = 0;
+  }
+
+  else if (keyCode == LEFT) {
+    if (isTrackSelected()) {
+      banks[selected.bank][selected.track].start -= 0.001;
+      banks[selected.bank][selected.track].end -= 0.001;
+    }
+  }
+
+  else if (keyCode == RIGHT) {
+    if (isTrackSelected()) {
+      banks[selected.bank][selected.track].start += 0.001;
+      banks[selected.bank][selected.track].end += 0.001;
+    }
+  }
+
+  else if (keyCode == UP) {
+    if (isTrackSelected()) {
+      banks[selected.bank][selected.track].end += 0.001;
+    }
+  }
+
+  else if (keyCode == DOWN) {
+    if (isTrackSelected()) {
+      banks[selected.bank][selected.track].end -= 0.001;
+    }
+  }
+
+  else if (key == ']') {
+    if (isTrackSelected() && selected.track < banks[selected.bank].length - 1) {
+      selected.track += 1;
+    } else if (isTrackSelected() && selected.track == banks[selected.bank].length - 1) {
+      selected.track = 0;
+    }
+  }
+
+  else if (key == '[') {
+    if (isTrackSelected() && selected.track > 0) {
+      selected.track -= 1;
+    } else if (isTrackSelected() && selected.track == 0) {
+      selected.track = banks[selected.bank].length -1;
+    }
+  }
+}
+
+void keyReleased() {
+  var bankId = char(key).toString();
+  if (/[a-z]/.test(bankId)) {
+    endTrack(bankId);
+  }
+}
+
+var KICKON = false;
+
+void beatDetection() {
+  if (!bd) return;
+
+  if (vu.vu_levels[0] > 0.1) {
+    KICKON = true; 
+    startTrack("beatDetection");
+  } else if (vu.vu_levels[0] < 0.05 && KICKON) { 
+    endTrack("beatDetection");
+    KICKON = false;
+  }
+}
+
+void mouseClicked() {
+  var newPositionInRadians = atan2(-(mouseX/ZOOM - (width/2 + OFFSET_X)/ZOOM), -(mouseY/ZOOM - (height/2 + OFFSET_Y)/ZOOM));
+  if (newPositionInRadians < 0) {
+    newPositionInRadians += TWO_PI;
+  }
+
+  newPositionInRadians = audioPositionInRadians - newPositionInRadians;
+
+  if (newPositionInRadians < 0) { 
+    newPositionInRadians += TWO_PI;
+  } else if (newPositionInRadians > TWO_PI) {
+    newPositionInRadians -= TWO_PI;
+  }
+    
+  var newPositionInSeconds = newPositionInRadians / TWO_PI * audioDurationInSeconds;
+
+  var distance = dist((width/2 + OFFSET_X)/ZOOM, (height/2 + OFFSET_Y)/ZOOM, mouseX/ZOOM, mouseY/ZOOM);
+
+  if (mouseButton == RIGHT) {
+    audio.currentTime = newPositionInSeconds;
+  } else if (mouseButton == LEFT) {
+    var row = round((distance - 32) / BIG);
+
+    var bankRow = 0;
+    for (var i in banks) {
+      if (bankRow == row) {
+        selected.bank = i;
+        selected.track = null;
+        for(var j = 0; j < banks[i].length; j++) {
+          if (banks[i][j].start <= newPositionInRadians && newPositionInRadians <= banks[i][j].end) {
+            selected.track = j;
+            //OFFSET_TARGET_X = (width/2 + OFFSET_X)/ZOOM - mouseX/ZOOM; 
+            //OFFSET_TARGET_Y = (height/2 + OFFSET_Y)/ZOOM - mouseY/ZOOM;
+            break;
+          }
+        }
+        break;
+      }
+      bankRow++;
+    }
+  }
+}
